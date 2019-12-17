@@ -1,0 +1,26 @@
+{
+  "name": "vci-puppeteer",
+  "version": "1.0.0",
+  "description": "Browser Automation against the VCI portal using puppeteer.",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+ssh://git@github.com/clingen-data-model/VCI-browser-automation.git"
+  },
+  "keywords": [
+    "VCI"
+  ],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/clingen-data-model/VCI-browser-automation/issues"
+  },
+  "homepage": "https://github.com/clingen-data-model/VCI-browser-automation#readme",
+  "dependencies": {
+    "puppeteer": "^2.0.0",
+    "puppeteer-core": "^2.0.0"
+  }
+}
