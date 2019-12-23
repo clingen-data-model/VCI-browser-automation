@@ -20,7 +20,9 @@
   },
   "homepage": "https://github.com/clingen-data-model/VCI-browser-automation#readme",
   "dependencies": {
+    "csv-parser": "^2.3.2",
     "puppeteer": "^2.0.0",
-    "puppeteer-core": "^2.0.0"
+    "puppeteer-core": "^2.0.0",
+    "yargs": "^15.0.2"
   }
 }

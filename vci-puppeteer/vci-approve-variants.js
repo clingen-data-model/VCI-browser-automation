@@ -1,6 +1,8 @@
+const csv = require('csv-parser');
 const fs = require('fs');
-var path = require('path');
+const path = require('path');
 const puppeteer = require('puppeteer');
+const yargs = require('yargs');
 
 // Settings for the differences between vci and vci test portals.
 const DOMAIN_CONFIG = {
@@ -89,17 +91,15 @@ const handleBtnClick = async(page, btnText, waitForBtnText=null, screenshotName=
   		await waitForBtn(page, waitForBtnText);
   	}
   	await page.screenshot({path: path.join(dir, screenshotName), fullPage: true});
-  	return;
-
 }
 
 const handleVariantPage = async(page, variant) => {
   	console.log(variant);
-	dir = path.join('variants', variant['name']);
-  	if (!fs.existsSync(dir)){
+	dir = path.join('variants', variant.name);
+  	if (!fs.existsSync(dir)) {
   		fs.mkdirSync(dir, { recursive: true });
   	}
-	await page.goto(variant['href']);
+	await page.goto(variant.href);
 	// Stupid wait for n seconds because something has to load or else things get rendered badly.
 	await page.waitFor(7000);
   	await page.waitFor('.view-summary');
@@ -118,20 +118,62 @@ const handleVariantPage = async(page, variant) => {
   	await handleBtnClick(page, 'Submit Approval ', 'ClinVar Submission Data', '7-submit-approval.png');
 }
 
-(async () => {
-	const browser = await puppeteer.launch();
-  	const page = await browser.newPage();
-  	await page.goto('https://' + DOMAIN);
+function variantsFromCSV(variantFile) {
+    return new Promise((resolve, reject) => {
+        var results = []
+        fs.createReadStream(variantFile)
+            .pipe(csv())
+            .on('data', (data) => results.push(data.Variant))
+            .on('end', () => {
+                resolve(results);
+            });  
+    });
 
-  	await login(page);
+}
 
-  	const variants = await filteredVariants(page, ['IN PROGRESS', 'PROVISIONAL']);
+const approveVariants = async(page, argv) => {
+	const variants = await filteredVariants(page, ['IN PROGRESS', 'PROVISIONAL']);
 
+	const csvVariants = await variantsFromCSV(argv.variantFile);
+    console.log(csvVariants)
+    console.log(variants)
   	// Testing purposes, only do 2 at a time.
   	for (var i = 0; i < 2; i++) {
-  		await handleVariantPage(page, variants[i]);
+  		variant = variants[i];
+        if (csvVariants.includes(variant.name)) {
+            console.log('Handling variant ' + variant.name + '.');
+            // await handleVariantPage(page, variant);
+        } else {
+            console.log('Variant ' + variant.name + ' not in csv file.');
+        }
   	}
-  	
-  	await browser.close();
-})();
+}
+
+function main() {
+	const argv = yargs
+	  .command('approve', 'Automate the approval of variants', function (yargs) {
+	    return yargs.option('variant-file', {
+	      alias: 'v',
+	    })
+	  })
+	  .help()
+	  .argv;
+
+	(async () => {
+		const browser = await puppeteer.launch();
+	  	const page = await browser.newPage();
+	  	await page.goto('https://' + DOMAIN);
+
+	  	await login(page);
+
+	  	if (argv._ == 'approve') {
+	  		await approveVariants(page, argv);
+	  	}
+	  	
+	  	await browser.close();
+	})();
+}
+
+main()
+
 
