@@ -12,7 +12,7 @@ Install dependencies
 }
 ```
 4. Run a quick test
-`node vci-approve-variants.js  clinvar -v White_List_VCI.csv --dry-run`
+`node vci-approve-variants.js clinvar --dry-run`
 
 ## Background
 TODO

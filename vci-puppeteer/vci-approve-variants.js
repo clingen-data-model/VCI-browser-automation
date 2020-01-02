@@ -156,7 +156,7 @@ function variantsFromCSV(variantFile) {
     });
 }
 
-const handleVariants = async(page, argv, command, dryRun) => {
+const handleVariants = async(page, variantFile, command, dryRun) => {
 	let filter = null;
 	if (command == Commands.APROVE) {
 		filter = ['IN PROGRESS', 'PROVISIONAL'];
@@ -165,13 +165,16 @@ const handleVariants = async(page, argv, command, dryRun) => {
 	}
 	const variants = await filteredVariants(page, filter);
 
-	const csvVariants = await variantsFromCSV(argv.variantFile);
+	let csvVariants = null;
+	if (variantFile) {
+		csvVariants = await variantsFromCSV(variantFile);
+	}
     console.log(csvVariants)
     console.log(variants)
   	// Testing purposes, only do 2 at a time.
   	for (var i = 0; i < 1; i++) {
   		variant = variants[i];
-        if (csvVariants.includes(variant.name)) {
+        if (!csvVariants || csvVariants.includes(variant.name)) {
             console.log('Handling variant ' + variant.name + '.');
             if (!dryRun) {
             	if (command == Commands.APROVE) {
@@ -203,7 +206,7 @@ function main() {
 	  	await page.goto('https://' + DOMAIN);
 
 	  	await login(page);
-	  	await handleVariants(page, argv, argv._, argv.dryRun != undefined && argv.dryRun);
+	  	await handleVariants(page, argv.variantFile, argv._, argv.dryRun != undefined && argv.dryRun);
 	  	
 	  	await browser.close();
 	})();
