@@ -4,6 +4,11 @@ const path = require('path');
 const puppeteer = require('puppeteer');
 const yargs = require('yargs');
 
+
+const Commands = Object.freeze({
+    APROVE:   "approve",
+    CLINVAR:  "clinvar",
+});
 // Settings for the differences between vci and vci test portals.
 const DOMAIN_CONFIG = {
 	'curation-test.clinicalgenome.org': {
@@ -65,7 +70,11 @@ const filteredVariants = async(page, filterStatuses) => {
 const btnWithText = async(page, btnText) => {
 	const btns = await page.$$('.btn');
 	for (btn of btns) {
+		/* The property is sometimes innerText and sometimes value, go figure. */
 		if (await (await btn.getProperty('innerText')).jsonValue() == btnText) {
+			return btn;
+		}
+		if (await (await btn.getProperty('value')).jsonValue() == btnText) {
 			return btn;
 		}
 	}
@@ -90,10 +99,10 @@ const handleBtnClick = async(page, btnText, waitForBtnText=null, screenshotName=
   	if (waitForBtnText) {
   		await waitForBtn(page, waitForBtnText);
   	}
-  	await page.screenshot({path: path.join(dir, screenshotName), fullPage: true});
+  	await page.screenshot({path: screenshotName, fullPage: true});
 }
 
-const handleVariantPage = async(page, variant) => {
+const handleApproveVariantPage = async(page, variant) => {
   	console.log(variant);
 	dir = path.join('variants', variant.name);
   	if (!fs.existsSync(dir)) {
@@ -118,6 +127,23 @@ const handleVariantPage = async(page, variant) => {
   	await handleBtnClick(page, 'Submit Approval ', 'ClinVar Submission Data', '7-submit-approval.png');
 }
 
+const handleClinvarVariantPage = async(page, variant) => {
+	console.log('handling clinvar variant page.')
+	await page.goto(variant.href);
+	// Stupid wait for n seconds because something has to load or else things get rendered badly.
+	await page.waitFor(7000);
+  	await page.waitFor('.view-summary');
+  	await page.click('.view-summary');
+  	await page.screenshot({path: 'progress.png', fullPage: true});
+
+  	await handleBtnClick(page, 'ClinVar Submission Data', 'Generate', 'progress.png');
+
+	await handleBtnClick(page, 'Generate', null, 'progress.png');
+	await page.waitFor(2000);
+	await page.screenshot({path: 'progress.png', fullPage: true});
+
+}
+
 function variantsFromCSV(variantFile) {
     return new Promise((resolve, reject) => {
         var results = []
@@ -128,21 +154,30 @@ function variantsFromCSV(variantFile) {
                 resolve(results);
             });  
     });
-
 }
 
-const approveVariants = async(page, argv) => {
-	const variants = await filteredVariants(page, ['IN PROGRESS', 'PROVISIONAL']);
+const handleVariants = async(page, argv, command) => {
+	let filter = null;
+	if (command == Commands.APROVE) {
+		filter = ['IN PROGRESS', 'PROVISIONAL'];
+	} else if (command == Commands.CLINVAR) {
+		filter = ['APPROVED'];
+	}
+	const variants = await filteredVariants(page, filter);
 
 	const csvVariants = await variantsFromCSV(argv.variantFile);
     console.log(csvVariants)
     console.log(variants)
   	// Testing purposes, only do 2 at a time.
-  	for (var i = 0; i < 2; i++) {
+  	for (var i = 0; i < 1; i++) {
   		variant = variants[i];
         if (csvVariants.includes(variant.name)) {
             console.log('Handling variant ' + variant.name + '.');
-            // await handleVariantPage(page, variant);
+            if (command == Commands.APROVE) {
+            	// await handleApproveVariantPage(page, variant);
+            } else if (command == Commands.CLINVAR) {
+            	await handleClinvarVariantPage(page, variant);
+            }
         } else {
             console.log('Variant ' + variant.name + ' not in csv file.');
         }
@@ -151,7 +186,12 @@ const approveVariants = async(page, argv) => {
 
 function main() {
 	const argv = yargs
-	  .command('approve', 'Automate the approval of variants', function (yargs) {
+	  .command(Commands.APROVE, 'Automate the approval of variants', function (yargs) {
+	    return yargs.option('variant-file', {
+	      alias: 'v',
+	    })
+	  })
+	  .command(Commands.CLINVAR, 'Automate the extraction of variant data for clinvar submission', function (yargs) {
 	    return yargs.option('variant-file', {
 	      alias: 'v',
 	    })
@@ -165,10 +205,7 @@ function main() {
 	  	await page.goto('https://' + DOMAIN);
 
 	  	await login(page);
-
-	  	if (argv._ == 'approve') {
-	  		await approveVariants(page, argv);
-	  	}
+	  	await handleVariants(page, argv, argv._);
 	  	
 	  	await browser.close();
 	})();
