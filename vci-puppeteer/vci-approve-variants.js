@@ -156,7 +156,7 @@ function variantsFromCSV(variantFile) {
     });
 }
 
-const handleVariants = async(page, argv, command) => {
+const handleVariants = async(page, argv, command, dryRun) => {
 	let filter = null;
 	if (command == Commands.APROVE) {
 		filter = ['IN PROGRESS', 'PROVISIONAL'];
@@ -173,10 +173,12 @@ const handleVariants = async(page, argv, command) => {
   		variant = variants[i];
         if (csvVariants.includes(variant.name)) {
             console.log('Handling variant ' + variant.name + '.');
-            if (command == Commands.APROVE) {
-            	// await handleApproveVariantPage(page, variant);
-            } else if (command == Commands.CLINVAR) {
-            	await handleClinvarVariantPage(page, variant);
+            if (!dryRun) {
+            	if (command == Commands.APROVE) {
+            		await handleApproveVariantPage(page, variant);
+            	} else if (command == Commands.CLINVAR) {
+            		await handleClinvarVariantPage(page, variant);
+            	}
             }
         } else {
             console.log('Variant ' + variant.name + ' not in csv file.');
@@ -186,17 +188,13 @@ const handleVariants = async(page, argv, command) => {
 
 function main() {
 	const argv = yargs
-	  .command(Commands.APROVE, 'Automate the approval of variants', function (yargs) {
-	    return yargs.option('variant-file', {
-	      alias: 'v',
-	    })
-	  })
-	  .command(Commands.CLINVAR, 'Automate the extraction of variant data for clinvar submission', function (yargs) {
-	    return yargs.option('variant-file', {
-	      alias: 'v',
-	    })
-	  })
+	  .command(Commands.APROVE, 'Automate the approval of variants')
+	  .command(Commands.CLINVAR, 'Automate the extraction of variant data for clinvar submission')
 	  .help()
+	  .option('variant-file', {
+	      alias: 'v',
+	  })
+	  .boolean('dry-run')
 	  .argv;
 
 	(async () => {
@@ -205,7 +203,7 @@ function main() {
 	  	await page.goto('https://' + DOMAIN);
 
 	  	await login(page);
-	  	await handleVariants(page, argv, argv._);
+	  	await handleVariants(page, argv, argv._, argv.dryRun != undefined && argv.dryRun);
 	  	
 	  	await browser.close();
 	})();
