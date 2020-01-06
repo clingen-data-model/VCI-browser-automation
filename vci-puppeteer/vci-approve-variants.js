@@ -9,65 +9,54 @@ const Commands = Object.freeze({
     APROVE:   "approve",
     CLINVAR:  "clinvar",
 });
+
+const DOMAIN_TEST = 'curation-test.clinicalgenome.org';
+const DOMAIN_PROD = 'curation.clinicalgenome.org';
+
 // Settings for the differences between vci and vci test portals.
 const DOMAIN_CONFIG = {
-	'curation-test.clinicalgenome.org': {
-		'login_button_selector': '.link~ .link+ .link span'
+	DOMAIN_TEST: {
+		domain: 'curation-test.clinicalgenome.org',
+		login_button_selector: '.link~ .link+ .link span'
 	},
-	'curation.clinicalgenome.org': {
-		'login_button_selector': '.link+ .link span'
+	DOMAIN_PROD: {
+		domain: 'curation.clinicalgenome.org',
+		login_button_selector: '.link+ .link span'
 	},
 }
-
-const DOMAIN = 'curation-test.clinicalgenome.org';
 
 const CREDENTIALS_DATA = fs.readFileSync('credentials.json');
 const CREDENTIALS = JSON.parse(CREDENTIALS_DATA);
 
-const login = async(page) => {
-	// Set affiliation cookie now so we don't have to go through affiliation selecting flow.
-  	await page.setCookie({
-	  	'domain': DOMAIN,
-	  	'httpOnly': false,
-	  	'name': 'affiliation',
-	  	'path': '/',
-	  	'sameSite': 'unspecified',
-	  	'secure': false,
-	  	'value': '{\"affiliation_id\":\"10029\",\"affiliation_fullname\":\"Broad Institute Rare Disease Group\",\"approver\":[\"Samantha Baxter\"]}',
-	})
-
-  	// Login selector, ugg no id. :( Clicks login button to open login modal.
-	await page.click(DOMAIN_CONFIG[DOMAIN]['login_button_selector']);
-	await page.waitFor('.auth0-lock-input-email .auth0-lock-input', {visible: true});
-
-	// Login with credentials.
-	await page.type('.auth0-lock-input-email .auth0-lock-input', CREDENTIALS.username);
-	await page.type('.auth0-lock-input-password .auth0-lock-input', CREDENTIALS.password);
-	await page.click('.auth0-lock-submit');
-	await page.waitForNavigation();
-
-	await page.waitFor('.affiliated-interpretation-list tr', {visible: true});
-}
-
 const filteredVariants = async(page, filterStatuses) => {
-	trs = await page.$$('.affiliated-interpretation-list tbody tr');
-	let retVariantLinks = []
+	/*
+	 Grabs all the variants from the interpretations list and returns a list of variants in
+	 with status in filterStatuses.
+	*/
+	let trs = await page.$$('.affiliated-interpretation-list tbody tr');
+	let retVariantLinks = [];
 	for (tr of trs) {
-		const status = await tr.$('.label')
-		const statusVal = await (await status.getProperty('innerText')).jsonValue();
-		if (filterStatuses.includes(statusVal)) {
-			const link = await tr.$('.affiliated-record-link');
-			const linkVal = await (await link.getProperty('href')).jsonValue()
+		const status = await tr.$('.label');
+		if (status) {
+			const statusVal = await (await status.getProperty('innerText')).jsonValue();
+			if (filterStatuses.includes(statusVal)) {
+				const link = await tr.$('.affiliated-record-link');
+				const linkVal = await (await link.getProperty('href')).jsonValue();
 
-			const variantName = await tr.$('.variant-title strong');
-			const variantNameVal = await (await link.getProperty('innerText')).jsonValue()
-			retVariantLinks.push({'href': linkVal, 'name': variantNameVal});
+				const variantName = await tr.$('.variant-title strong');
+				const variantNameVal = await (await link.getProperty('innerText')).jsonValue();
+				retVariantLinks.push({'href': linkVal, 'name': variantNameVal});
+			}
 		}
 	}
 	return retVariantLinks;
 }
 
 const btnWithText = async(page, btnText) => {
+	/* 
+	 Find a button with a certain text by grabbing all class 'btn' and searching for
+	 the one with the provided text.
+	*/
 	const btns = await page.$$('.btn');
 	for (btn of btns) {
 		/* The property is sometimes innerText and sometimes value, go figure. */
@@ -82,6 +71,9 @@ const btnWithText = async(page, btnText) => {
 }
 
 const waitForBtn = async(page, btnText, retries=5, timeout=1000) => {
+	/*
+	  Waits for a button element with a certain text. 
+	*/
 	for (var i = 0; i < retries; i++) {
 		const btn = await btnWithText(page, btnText);
 		if (btn != null) {
@@ -93,13 +85,19 @@ const waitForBtn = async(page, btnText, retries=5, timeout=1000) => {
 	throw 'Could not find button ' + btnText;
 }
 
-const handleBtnClick = async(page, btnText, waitForBtnText=null, screenshotName='progress.png', retries=3, timeout=1000) => {
+const handleBtnClick = async(page, btnText, waitForBtnText=null, screenshotName=null, retries=3, timeout=1000) => {
+	/* 
+	  Waits for a button with a certain text and clicks on it. If `waitForBtnText` is provided, it will then wait
+	  for that button to appear. If screenshot provided, snaps a screenshot.
+	*/
 	const btn = await btnWithText(page, btnText);
   	await btn.click();
   	if (waitForBtnText) {
   		await waitForBtn(page, waitForBtnText);
   	}
-  	await page.screenshot({path: screenshotName, fullPage: true});
+  	if (screenshotName) {
+		await page.screenshot({path: screenshotName, fullPage: true});
+  	}
 }
 
 const handleApproveVariantPage = async(page, variant) => {
@@ -145,6 +143,9 @@ const handleClinvarVariantPage = async(page, variant) => {
 }
 
 function variantsFromCSV(variantFile) {
+	/* 
+	Grabs all variants from the csv. 
+	*/
     return new Promise((resolve, reject) => {
         var results = []
         fs.createReadStream(variantFile)
@@ -163,17 +164,19 @@ const handleVariants = async(page, variantFile, command, dryRun) => {
 	} else if (command == Commands.CLINVAR) {
 		filter = ['APPROVED'];
 	}
+	// Variants from the page with the filter applied.
 	const variants = await filteredVariants(page, filter);
 
+	// Variants from the csv file.
 	let csvVariants = null;
 	if (variantFile) {
 		csvVariants = await variantsFromCSV(variantFile);
 	}
+
     console.log(csvVariants)
     console.log(variants)
-  	// Testing purposes, only do 2 at a time.
-  	for (var i = 0; i < 1; i++) {
-  		variant = variants[i];
+
+  	for (var variant of variants) {
         if (!csvVariants || csvVariants.includes(variant.name)) {
             console.log('Handling variant ' + variant.name + '.');
             if (!dryRun) {
@@ -189,6 +192,33 @@ const handleVariants = async(page, variantFile, command, dryRun) => {
   	}
 }
 
+const login = async(page, domain) => {
+	// Set affiliation cookie now so we don't have to go through affiliation selecting flow.
+  	await page.setCookie({
+	  	'domain': DOMAIN_CONFIG[domain].domain,
+	  	'httpOnly': false,
+	  	'name': 'affiliation',
+	  	'path': '/',
+	  	'sameSite': 'unspecified',
+	  	'secure': false,
+	  	'value': '{\"affiliation_id\":\"10029\",\"affiliation_fullname\":\"Broad Institute Rare Disease Group\",\"approver\":[\"Samantha Baxter\"]}',
+	})
+
+  	// Login selector, ugg no id. :( Clicks login button to open login modal.
+	await page.click(DOMAIN_CONFIG[domain]['login_button_selector']);
+	await page.waitFor('.auth0-lock-input-email .auth0-lock-input', {visible: true});
+
+	// Login with credentials.
+	await page.type('.auth0-lock-input-email .auth0-lock-input', CREDENTIALS.username);
+	await page.type('.auth0-lock-input-password .auth0-lock-input', CREDENTIALS.password);
+	await page.click('.auth0-lock-submit');
+	await page.waitForNavigation();
+
+	await page.screenshot({path: 'progress.png', fullPage: true});
+	// If there are many interpretations, this sometimes takes a long time to load. Increase the timeout if it gets stuck.
+	await page.waitFor('.affiliated-interpretation-list tbody tr', {visible: true, timeout: 40000});
+}
+
 function main() {
 	const argv = yargs
 	  .command(Commands.APROVE, 'Automate the approval of variants')
@@ -198,14 +228,17 @@ function main() {
 	      alias: 'v',
 	  })
 	  .boolean('dry-run')
+	  .boolean('prod')
 	  .argv;
+
+	let domain = (argv.prod) ? 'DOMAIN_PROD' : 'DOMAIN_TEST';
 
 	(async () => {
 		const browser = await puppeteer.launch();
 	  	const page = await browser.newPage();
-	  	await page.goto('https://' + DOMAIN);
+	  	await page.goto('https://' + DOMAIN_CONFIG[domain].domain);
 
-	  	await login(page);
+	  	await login(page, domain);
 	  	await handleVariants(page, argv.variantFile, argv._, argv.dryRun != undefined && argv.dryRun);
 	  	
 	  	await browser.close();
