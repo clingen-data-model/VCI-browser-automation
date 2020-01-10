@@ -28,13 +28,21 @@ const DOMAIN_CONFIG = {
 const CREDENTIALS_DATA = fs.readFileSync('credentials.json');
 const CREDENTIALS = JSON.parse(CREDENTIALS_DATA);
 
+function setDifference(setA, setB) {
+	return new Set([...setA].filter(x => !setB.has(x)));
+}
+
+function setIntersection(setA, setB) {
+	return new Set([...setA].filter(x => setB.has(x)));
+}
+
 const filteredVariants = async(page, filterStatuses) => {
 	/*
 	 Grabs all the variants from the interpretations list and returns a list of variants in
 	 with status in filterStatuses.
 	*/
 	let trs = await page.$$('.affiliated-interpretation-list tbody tr');
-	let retVariantLinks = [];
+	let retVariantLinks = new Map();
 	for (tr of trs) {
 		const status = await tr.$('.label');
 		if (status) {
@@ -45,7 +53,7 @@ const filteredVariants = async(page, filterStatuses) => {
 
 				const variantName = await tr.$('.variant-title strong');
 				const variantNameVal = await (await link.getProperty('innerText')).jsonValue();
-				retVariantLinks.push({'href': linkVal, 'name': variantNameVal});
+				retVariantLinks.set(variantNameVal, {'href': linkVal});
 			}
 		}
 	}
@@ -100,12 +108,19 @@ const handleBtnClick = async(page, btnText, waitForBtnText=null, screenshotName=
   	}
 }
 
-const handleApproveVariantPage = async(page, variant) => {
-  	console.log(variant);
-	dir = path.join('variants', variant.name);
+function variantDir(variantName) {
+	/* 
+	  Returns a directory for the variant (creates dir if it does not exist).
+	*/
+	dir = path.join('variants', variantName);
   	if (!fs.existsSync(dir)) {
   		fs.mkdirSync(dir, { recursive: true });
   	}
+  	return dir;
+}
+
+const handleApproveVariantPage = async(page, variant) => {
+	const dir = variantDir(variant.name)
 	await page.goto(variant.href);
 	// Stupid wait for n seconds because something has to load or else things get rendered badly.
 	await page.waitFor(7000);
@@ -117,8 +132,8 @@ const handleApproveVariantPage = async(page, variant) => {
   	await page.screenshot({path: path.join(dir, '2-view-summary.png'), fullPage: true});
 
   	await handleBtnClick(page, 'Save', 'Preview Provisional', '3-save.png');
-  	// Yes, the end space in 'Submit Provisional ' is really there.
   	await handleBtnClick(page, 'Preview Provisional', 'Submit Provisional ', '4-preview-provisional.png');
+  	// Yes, the end space in 'Submit Provisional ' is really there.
   	await handleBtnClick(page, 'Submit Provisional ', 'Preview Approval', '5-submit-provisional.png');
   	await page.select('.form-control', 'Samantha Baxter');
   	await handleBtnClick(page, 'Preview Approval', 'Submit Approval ', '6-preview-approval.png');
@@ -127,6 +142,7 @@ const handleApproveVariantPage = async(page, variant) => {
 
 const handleClinvarVariantPage = async(page, variant) => {
 	console.log('handling clinvar variant page.')
+	const dir = variantDir(variant.name)
 	await page.goto(variant.href);
 	// Stupid wait for n seconds because something has to load or else things get rendered badly.
 	await page.waitFor(7000);
@@ -137,9 +153,25 @@ const handleClinvarVariantPage = async(page, variant) => {
   	await handleBtnClick(page, 'ClinVar Submission Data', 'Generate', 'progress.png');
 
 	await handleBtnClick(page, 'Generate', null, 'progress.png');
-	await page.waitFor(2000);
+	await page.waitFor('#generated-clinvar-submission-data table tr td');
 	await page.screenshot({path: 'progress.png', fullPage: true});
 
+	// Grab the clinvar table.
+	const clinvarData = await page.evaluate(() => {
+	    const tds = Array.from(document.querySelectorAll('#generated-clinvar-submission-data table tr td'));
+	    return tds.map(td => td.innerHTML);
+	});
+
+	// Write to a file. 
+	const clinvarCsvPath = path.join(dir, 'clinvar.csv');
+	const clinvarString = clinvarData.join();
+	fs.writeFile(clinvarCsvPath, clinvarString, (err) => {
+	    if (err) throw err;
+	    console.log('=====');
+	    console.log('Wrote the following to ' + clinvarCsvPath + ':');
+	    console.log(clinvarString);
+	    console.log('=====');
+	})
 }
 
 function variantsFromCSV(variantFile) {
@@ -165,29 +197,38 @@ const handleVariants = async(page, variantFile, command, dryRun) => {
 		filter = ['APPROVED'];
 	}
 	// Variants from the page with the filter applied.
-	const variants = await filteredVariants(page, filter);
+	const pageVariants = await filteredVariants(page, filter);
 
-	// Variants from the csv file.
-	let csvVariants = null;
+	let variantsToIterate = [...pageVariants.keys()];
+	// variantFile given.
 	if (variantFile) {
-		csvVariants = await variantsFromCSV(variantFile);
-	}
+		const csvVariants = await variantsFromCSV(variantFile);
 
-    console.log(csvVariants)
-    console.log(variants)
+		const csvVariantsSet = new Set(csvVariants);
+		const pageVariantSet = new Set([...pageVariants.keys()]);
+		const variantIntersection = setIntersection(csvVariantsSet, pageVariantSet);
 
-  	for (var variant of variants) {
-        if (!csvVariants || csvVariants.includes(variant.name)) {
-            console.log('Handling variant ' + variant.name + '.');
-            if (!dryRun) {
-            	if (command == Commands.APROVE) {
-            		await handleApproveVariantPage(page, variant);
+		console.log('There are ' + variantIntersection.size + ' variant(s) from the CSV that are also on the page');
+		console.log(variantIntersection);
+		console.log('The following variants are in the csv but not on the page:');
+		console.log(setDifference(csvVariantsSet, pageVariantSet));
+		console.log('The following variants are on the page but not in the csv:');
+		console.log(setDifference(pageVariantSet, csvVariantsSet));
+		variantsToIterate = Array.from(variantIntersection);
+	} 
+
+  	for (var variant of variantsToIterate) {
+        console.log('Handling variant ' + variant + '.');
+        if (!dryRun) {
+        	try {
+        		if (command == Commands.APROVE) {
+            		await handleApproveVariantPage(page, {name: variant, href: pageVariants.get(variant).href});
             	} else if (command == Commands.CLINVAR) {
-            		await handleClinvarVariantPage(page, variant);
+            		await handleClinvarVariantPage(page, {name: variant, href: pageVariants.get(variant).href});
             	}
-            }
-        } else {
-            console.log('Variant ' + variant.name + ' not in csv file.');
+        	} catch(err) {
+        		console.error(err);
+        	}
         }
   	}
 }
@@ -214,7 +255,6 @@ const login = async(page, domain) => {
 	await page.click('.auth0-lock-submit');
 	await page.waitForNavigation();
 
-	await page.screenshot({path: 'progress.png', fullPage: true});
 	// If there are many interpretations, this sometimes takes a long time to load. Increase the timeout if it gets stuck.
 	await page.waitFor('.affiliated-interpretation-list tbody tr', {visible: true, timeout: 40000});
 }
