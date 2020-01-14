@@ -131,47 +131,63 @@ const handleApproveVariantPage = async(page, variant) => {
   	await waitForBtn(page, 'Save');
   	await page.screenshot({path: path.join(dir, '2-view-summary.png'), fullPage: true});
 
-  	await handleBtnClick(page, 'Save', 'Preview Provisional', '3-save.png');
-  	await handleBtnClick(page, 'Preview Provisional', 'Submit Provisional ', '4-preview-provisional.png');
+  	await handleBtnClick(page, 'Save', 'Preview Provisional', path.join(dir,'3-save.png'));
+  	await handleBtnClick(page, 'Preview Provisional', 'Submit Provisional ', path.join(dir,'4-preview-provisional.png'));
   	// Yes, the end space in 'Submit Provisional ' is really there.
-  	await handleBtnClick(page, 'Submit Provisional ', 'Preview Approval', '5-submit-provisional.png');
+  	await handleBtnClick(page, 'Submit Provisional ', 'Preview Approval', path.join(dir,'5-submit-provisional.png'));
   	await page.select('.form-control', 'Samantha Baxter');
-  	await handleBtnClick(page, 'Preview Approval', 'Submit Approval ', '6-preview-approval.png');
-  	await handleBtnClick(page, 'Submit Approval ', 'ClinVar Submission Data', '7-submit-approval.png');
+  	await handleBtnClick(page, 'Preview Approval', 'Submit Approval ', path.join(dir,'6-preview-approval.png'));
+  	await handleBtnClick(page, 'Submit Approval ', 'ClinVar Submission Data', path.join(dir,'7-submit-approval.png'));
 }
 
-const handleClinvarVariantPage = async(page, variant) => {
+const handleClinvarVariantPage = async(page, variant, aggregateCsvFile) => {
 	console.log('handling clinvar variant page.')
 	const dir = variantDir(variant.name)
-	await page.goto(variant.href);
-	// Stupid wait for n seconds because something has to load or else things get rendered badly.
-	await page.waitFor(7000);
-  	await page.waitFor('.view-summary');
-  	await page.click('.view-summary');
-  	await page.screenshot({path: 'progress.png', fullPage: true});
 
-  	await handleBtnClick(page, 'ClinVar Submission Data', 'Generate', 'progress.png');
+	// Default string is an error with the variant name to be appended to the growing file so we know which variant failed.
+	let clinvarString = 'ERROR: ' + variant.name;
+	try {
+		await page.goto(variant.href);
+		// Stupid wait for n seconds because something has to load or else things get rendered badly.
+		await page.waitFor(7000);
+	  	await page.waitFor('.view-summary');
+	  	await page.click('.view-summary');
+	  	await page.screenshot({path: 'progress.png', fullPage: true});
 
-	await handleBtnClick(page, 'Generate', null, 'progress.png');
-	await page.waitFor('#generated-clinvar-submission-data table tr td');
-	await page.screenshot({path: 'progress.png', fullPage: true});
+	  	await handleBtnClick(page, 'ClinVar Submission Data', 'Generate', 'progress.png');
 
-	// Grab the clinvar table.
-	const clinvarData = await page.evaluate(() => {
-	    const tds = Array.from(document.querySelectorAll('#generated-clinvar-submission-data table tr td'));
-	    return tds.map(td => td.innerHTML);
-	});
+		await handleBtnClick(page, 'Generate', null, 'progress.png');
+		await page.waitFor('#generated-clinvar-submission-data table tr td');
+		await page.screenshot({path: 'progress.png', fullPage: true});
 
-	// Write to a file. 
-	const clinvarCsvPath = path.join(dir, 'clinvar.csv');
-	const clinvarString = clinvarData.join();
-	fs.writeFile(clinvarCsvPath, clinvarString, (err) => {
-	    if (err) throw err;
-	    console.log('=====');
-	    console.log('Wrote the following to ' + clinvarCsvPath + ':');
-	    console.log(clinvarString);
-	    console.log('=====');
-	})
+		// Grab the clinvar table.
+		const clinvarData = await page.evaluate(() => {
+		    const tds = Array.from(document.querySelectorAll('#generated-clinvar-submission-data table tr td'));
+		    return tds.map(td => td.innerHTML);
+		});
+
+		clinvarString = clinvarData.join();
+
+		// Write to a file. 
+		const clinvarCsvPath = path.join(dir, 'clinvar.csv');
+		fs.writeFile(clinvarCsvPath, clinvarString + '\n', (err) => {
+		    if (err) throw err;
+		    console.log('=====');
+		    console.log('Wrote the following to ' + clinvarCsvPath + ':');
+		    console.log(clinvarString);
+		    console.log('=====');
+		})
+	} catch(err) {
+		throw err;
+	} finally {
+		// In all cases, append to file (if error, we have the default variant name as placeholder).
+		fs.appendFile(aggregateCsvFile, clinvarString + '\n', (err) => {
+		    if (err) throw err;
+		    console.log('=====');
+		    console.log('Appended to aggregate file ' + aggregateCsvFile);
+		    console.log('=====');
+		})
+	}
 }
 
 function variantsFromCSV(variantFile) {
@@ -217,6 +233,8 @@ const handleVariants = async(page, variantFile, command, dryRun) => {
 		variantsToIterate = Array.from(variantIntersection);
 	} 
 
+	// CSV file that agregates all the clinvar submissions (used only if clinvar command selected).
+	const aggregateCsvFile = 'clinvar-submission-' + Math.round(new Date().getTime()/1000).toString() + '.csv';
   	for (var variant of variantsToIterate) {
         console.log('Handling variant ' + variant + '.');
         if (!dryRun) {
@@ -224,7 +242,7 @@ const handleVariants = async(page, variantFile, command, dryRun) => {
         		if (command == Commands.APROVE) {
             		await handleApproveVariantPage(page, {name: variant, href: pageVariants.get(variant).href});
             	} else if (command == Commands.CLINVAR) {
-            		await handleClinvarVariantPage(page, {name: variant, href: pageVariants.get(variant).href});
+            		await handleClinvarVariantPage(page, {name: variant, href: pageVariants.get(variant).href}, aggregateCsvFile);
             	}
         	} catch(err) {
         		console.error(err);
@@ -275,13 +293,17 @@ function main() {
 
 	(async () => {
 		const browser = await puppeteer.launch();
-	  	const page = await browser.newPage();
-	  	await page.goto('https://' + DOMAIN_CONFIG[domain].domain);
+		try {
+		  	const page = await browser.newPage();
+		  	await page.goto('https://' + DOMAIN_CONFIG[domain].domain);
 
-	  	await login(page, domain);
-	  	await handleVariants(page, argv.variantFile, argv._, argv.dryRun != undefined && argv.dryRun);
-	  	
-	  	await browser.close();
+		  	await login(page, domain);
+		  	await handleVariants(page, argv.variantFile, argv._, argv.dryRun != undefined && argv.dryRun);
+		} catch(err) {
+			console.error(err);
+		} finally {
+		  	await browser.close();
+		}
 	})();
 }
 
