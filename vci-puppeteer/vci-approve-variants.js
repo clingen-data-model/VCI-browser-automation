@@ -131,13 +131,13 @@ const handleApproveVariantPage = async(page, variant) => {
   	await waitForBtn(page, 'Save');
   	await page.screenshot({path: path.join(dir, '2-view-summary.png'), fullPage: true});
 
-  	await handleBtnClick(page, 'Save', 'Preview Provisional', '3-save.png');
-  	await handleBtnClick(page, 'Preview Provisional', 'Submit Provisional ', '4-preview-provisional.png');
+  	await handleBtnClick(page, 'Save', 'Preview Provisional', path.join(dir,'3-save.png'));
+  	await handleBtnClick(page, 'Preview Provisional', 'Submit Provisional ', path.join(dir,'4-preview-provisional.png'));
   	// Yes, the end space in 'Submit Provisional ' is really there.
-  	await handleBtnClick(page, 'Submit Provisional ', 'Preview Approval', '5-submit-provisional.png');
+  	await handleBtnClick(page, 'Submit Provisional ', 'Preview Approval', path.join(dir,'5-submit-provisional.png'));
   	await page.select('.form-control', 'Samantha Baxter');
-  	await handleBtnClick(page, 'Preview Approval', 'Submit Approval ', '6-preview-approval.png');
-  	await handleBtnClick(page, 'Submit Approval ', 'ClinVar Submission Data', '7-submit-approval.png');
+  	await handleBtnClick(page, 'Preview Approval', 'Submit Approval ', path.join(dir,'6-preview-approval.png'));
+  	await handleBtnClick(page, 'Submit Approval ', 'ClinVar Submission Data', path.join(dir,'7-submit-approval.png'));
 }
 
 const handleClinvarVariantPage = async(page, variant) => {
@@ -275,13 +275,17 @@ function main() {
 
 	(async () => {
 		const browser = await puppeteer.launch();
-	  	const page = await browser.newPage();
-	  	await page.goto('https://' + DOMAIN_CONFIG[domain].domain);
+		try {
+		  	const page = await browser.newPage();
+		  	await page.goto('https://' + DOMAIN_CONFIG[domain].domain);
 
-	  	await login(page, domain);
-	  	await handleVariants(page, argv.variantFile, argv._, argv.dryRun != undefined && argv.dryRun);
-	  	
-	  	await browser.close();
+		  	await login(page, domain);
+		  	await handleVariants(page, argv.variantFile, argv._, argv.dryRun != undefined && argv.dryRun);
+		} catch(err) {
+			console.error(err);
+		} finally {
+		  	await browser.close();
+		}
 	})();
 }
 
