@@ -163,13 +163,13 @@ const handleClinvarVariantPage = async(page, variant, aggregateCsvFile) => {
 		// Grab the clinvar table.
 		const clinvarData = await page.evaluate(() => {
 		    const tds = Array.from(document.querySelectorAll('#generated-clinvar-submission-data table tr td'));
-		    return tds.map(td => td.innerHTML);
+		    return tds.map(td => td.innerText);
 		});
 
-		clinvarString = clinvarData.join();
+		clinvarString = clinvarData.join('\t');
 
 		// Write to a file. 
-		const clinvarCsvPath = path.join(dir, 'clinvar.csv');
+		const clinvarCsvPath = path.join(dir, 'clinvar.tsv');
 		fs.writeFile(clinvarCsvPath, clinvarString + '\n', (err) => {
 		    if (err) throw err;
 		    console.log('=====');
@@ -234,7 +234,7 @@ const handleVariants = async(page, variantFile, command, dryRun) => {
 	} 
 
 	// CSV file that agregates all the clinvar submissions (used only if clinvar command selected).
-	const aggregateCsvFile = 'clinvar-submission-' + Math.round(new Date().getTime()/1000).toString() + '.csv';
+	const aggregateCsvFile = 'clinvar-submission-' + Math.round(new Date().getTime()/1000).toString() + '.tsv';
   	for (var variant of variantsToIterate) {
         console.log('Handling variant ' + variant + '.');
         if (!dryRun) {
@@ -274,7 +274,7 @@ const login = async(page, domain) => {
 	await page.waitForNavigation();
 
 	// If there are many interpretations, this sometimes takes a long time to load. Increase the timeout if it gets stuck.
-	await page.waitFor('.affiliated-interpretation-list tbody tr', {visible: true, timeout: 40000});
+	await page.waitFor('.affiliated-interpretation-list tbody tr', {visible: true, timeout: 120000});
 }
 
 function main() {
