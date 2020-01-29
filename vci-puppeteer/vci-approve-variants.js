@@ -2,6 +2,7 @@ const csv = require('csv-parser');
 const fs = require('fs');
 const path = require('path');
 const puppeteer = require('puppeteer');
+const puppeteerErrors = require('puppeteer/errors');
 const yargs = require('yargs');
 
 
@@ -27,6 +28,33 @@ const DOMAIN_CONFIG = {
 
 const CREDENTIALS_DATA = fs.readFileSync('credentials.json');
 const CREDENTIALS = JSON.parse(CREDENTIALS_DATA);
+
+class ButtonMissingError extends Error {
+  constructor(message) {
+    super(message); // (1)
+    this.name = "ButtonMissingError"; // (2)
+  }
+}
+
+// Keept track of stats on the run to print out at the end or on exit.
+let runStatistics = {
+	attempted: 0,
+	errors: {
+			ButtonMissingError: {
+			type: ButtonMissingError,
+			count: 0
+		},
+		TimeoutError: {
+			type: puppeteerErrors.TimeoutError,
+			count: 0
+		},
+		// Every error should match this since it's the superclass.
+		Error: {
+			type: Error,
+			count: 0
+		},
+	}
+};
 
 function setDifference(setA, setB) {
 	return new Set([...setA].filter(x => !setB.has(x)));
@@ -90,7 +118,7 @@ const waitForBtn = async(page, btnText, retries=5, timeout=1000) => {
 		await page.waitFor(timeout);
 		// console.log('Try' + i + '. Could not find button ' + btnText)
 	}
-	throw 'Could not find button ' + btnText;
+	throw ButtonMissingError('Could not find button ' + btnText);
 }
 
 const handleBtnClick = async(page, btnText, waitForBtnText=null, screenshotName=null, retries=3, timeout=1000) => {
@@ -245,11 +273,18 @@ const handleVariants = async(page, variantFile, command, dryRun) => {
             		await handleClinvarVariantPage(page, {name: variant, href: pageVariants.get(variant).href}, aggregateCsvFile);
             	}
         	} catch(err) {
-        		console.error(err);
+        		for (const subErrors in runStatistics.errors) {
+        			if (err instanceof runStatistics.errors[subErrors].type) {
+        				runStatistics.errors[subErrors].count++;
+        			}
+        		}
         	}
         }
+        runStatistics.attempted++;
   	}
+  	printRunStatistics();
 }
+
 
 const login = async(page, domain) => {
 	// Set affiliation cookie now so we don't have to go through affiliation selecting flow.
@@ -306,6 +341,30 @@ function main() {
 		}
 	})();
 }
+
+function printRunStatistics() {
+	let errorCount = runStatistics.errors.Error.count;
+	console.log('======');
+	console.log('attempted count:' + runStatistics.attempted)
+	console.log('success count: ' + (runStatistics.attempted - errorCount));
+	console.log('error count: ' + errorCount);
+	console.log('======');
+	// definedErrors are errors that we know about (defined in our errors object).
+	let definedErrors = 0;
+	for (const subError in runStatistics.errors) {
+		if (runStatistics.errors[subError].type !== Error) {
+			console.log(subError + ' count: ' + runStatistics.errors[subError].count);
+			definedErrors += runStatistics.errors[subError].count;
+		}
+	}
+	console.log('Errors not defined: ' + (errorCount - definedErrors));
+}
+
+// If exiting, print out run statistics.
+process.on( 'SIGINT', function() {
+	console.log('Shutting Down...');
+	printRunStatistics();
+});
 
 main()
 
